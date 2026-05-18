@@ -155,9 +155,26 @@ const DEFAULT_STATE = {
   workoutText: '',
   exercises:   [],
   weekPlan:    { ...EMPTY_WEEK },
-  history:     {},
   shutdown:    { triggered: false, success: '' },
   settings:    { tranceInterval: 60, eveningMode: false },
+}
+
+function buildDayEntry(state) {
+  const { anchors } = state
+  const nonHeaderEx = (state.exercises || []).filter(ex => !ex.isHeader)
+  return {
+    workout: {
+      completed: anchors.workout.completed || anchors.workout.isRestDay,
+      isRestDay: anchors.workout.isRestDay,
+      exercises: nonHeaderEx.map(ex => ({ name: ex.exercise, done: ex.completed })),
+      doneCount: nonHeaderEx.filter(ex => ex.completed).length,
+      totalCount: nonHeaderEx.length,
+    },
+    read:     { completed: anchors.read.completed },
+    meditate: { completed: anchors.meditate.completed, duration: anchors.meditate.duration || null },
+    checkin:  { completed: anchors.checkin.completed, mood: anchors.checkin.mood },
+    success:  state.shutdown?.success || '',
+  }
 }
 
 // ── BreathingPacer ────────────────────────────────────────────────────────────
@@ -1109,7 +1126,7 @@ function LoginScreen({ onAuth, onSkip }) {
 }
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────
-function Dashboard({ state, onUpdate, user, onSignOut }) {
+function Dashboard({ state, onUpdate, user, onSignOut, history }) {
   const [showTrance,   setShowTrance]   = useState(false)
   const [showToday,    setShowToday]    = useState(false)
   const [showWeek,     setShowWeek]     = useState(false)
@@ -1178,8 +1195,9 @@ function Dashboard({ state, onUpdate, user, onSignOut }) {
           </div>
           <div className="flex items-center gap-3">
             <div className="flex gap-1">
-              {[0,1,2,3].map(i => (
-                <div key={i} className={`w-2 h-2 rounded-full transition-all duration-500 ${i < completedCount ? 'bg-sage' : 'bg-mineral/15'}`} />
+              {['anchor-workout','anchor-read','anchor-meditate','anchor-checkin'].map((id, i) => (
+                <button key={i} onClick={() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
+                  className={`w-2 h-2 rounded-full transition-all duration-500 ${i < completedCount ? 'bg-sage' : 'bg-mineral/15'}`} />
               ))}
             </div>
             {user && (
@@ -1205,20 +1223,28 @@ function Dashboard({ state, onUpdate, user, onSignOut }) {
           I'm stuck / overwhelmed
         </button>
 
-        <WorkoutCard
-          state={state}
-          onUpdate={onUpdate}
-          onOpenToday={() => setShowToday(true)}
-          onOpenWeek={() => setShowWeek(true)}
-        />
+        <div id="anchor-workout">
+          <WorkoutCard
+            state={state}
+            onUpdate={onUpdate}
+            onOpenToday={() => setShowToday(true)}
+            onOpenWeek={() => setShowWeek(true)}
+          />
+        </div>
 
-        <AnchorCard icon={BookOpen} label="Read" completed={state.anchors.read.completed} onToggle={() => toggleAnchor('read')}>
-          <p className="text-mineral/30 text-xs">Any book, article, or paper. Just read.</p>
-        </AnchorCard>
+        <div id="anchor-read">
+          <AnchorCard icon={BookOpen} label="Read" completed={state.anchors.read.completed} onToggle={() => toggleAnchor('read')}>
+            <p className="text-mineral/30 text-xs">Any book, article, or paper. Just read.</p>
+          </AnchorCard>
+        </div>
 
-        <MeditateCard state={state} onUpdate={onUpdate} />
+        <div id="anchor-meditate">
+          <MeditateCard state={state} onUpdate={onUpdate} />
+        </div>
 
-        <CheckinCard state={state} onUpdate={onUpdate} />
+        <div id="anchor-checkin">
+          <CheckinCard state={state} onUpdate={onUpdate} />
+        </div>
 
         <TranceWidget
           interval={state.settings.tranceInterval}
@@ -1227,7 +1253,7 @@ function Dashboard({ state, onUpdate, user, onSignOut }) {
         />
 
         <div className="bg-card-dark rounded-2xl p-5 border border-mineral/10">
-          <HistoryGrid history={state.history} />
+          <HistoryGrid history={{ ...history, [getToday()]: buildDayEntry(state) }} />
         </div>
 
         {!state.settings.eveningMode && (
@@ -1255,41 +1281,35 @@ export default function App() {
   const [user,     setUser]     = useState(null)
   const [loading,  setLoading]  = useState(true)
   const [appState, setAppState] = useState(DEFAULT_STATE)
-  const syncRef = useRef(null)
+  const [history,  setHistory]  = useState({})
+  const syncRef          = useRef(null)
+  const writeDailyLogRef = useRef(null)
+
+  writeDailyLogRef.current = (date, entry) => {
+    setHistory(h => ({ ...h, [date]: entry }))
+    if (user && hasSupabase) {
+      supabase.from('daily_logs').upsert({ user_id: user.id, date, entry })
+    } else {
+      try {
+        const saved = localStorage.getItem('anchorspace-history')
+        const hist  = saved ? JSON.parse(saved) : {}
+        hist[date]  = entry
+        localStorage.setItem('anchorspace-history', JSON.stringify(hist))
+      } catch {}
+    }
+  }
 
   const maybeReset = (state) => {
     const today = getToday()
     if (state.lastDate === today) return state
-    const { anchors, lastDate, history, weekPlan } = state
-    const nonHeaderEx = (state.exercises || []).filter(ex => !ex.isHeader)
-    const dayEntry = {
-      workout: {
-        completed: anchors.workout.completed || anchors.workout.isRestDay,
-        isRestDay: anchors.workout.isRestDay,
-        exercises: nonHeaderEx.map(ex => ({ name: ex.exercise, done: ex.completed })),
-        doneCount: nonHeaderEx.filter(ex => ex.completed).length,
-        totalCount: nonHeaderEx.length,
-      },
-      read: {
-        completed: anchors.read.completed,
-      },
-      meditate: {
-        completed: anchors.meditate.completed,
-        duration:  anchors.meditate.duration || null,
-      },
-      checkin: {
-        completed: anchors.checkin.completed,
-        mood:      anchors.checkin.mood,
-      },
-      success: state.shutdown?.success || '',
-    }
+    const { weekPlan } = state
+    setTimeout(() => writeDailyLogRef.current?.(state.lastDate, buildDayEntry(state)), 0)
     const todayKey  = DAY_KEYS[todayDayIdx()]
     const todayText = (weekPlan || {})[todayKey] || ''
     const isRest    = todayText === 'REST'
     const parsed    = isRest ? [] : (todayText ? parseWorkout(todayText) : state.exercises.map(ex => ({ ...ex, completed: false })))
     return {
       ...DEFAULT_STATE,
-      history:     { ...history, [lastDate]: dayEntry },
       weekPlan:    weekPlan || { ...EMPTY_WEEK },
       workoutText: isRest ? '' : (todayText || state.workoutText),
       exercises:   parsed,
@@ -1306,11 +1326,23 @@ export default function App() {
       const saved = localStorage.getItem('anchorspace')
       if (saved) setAppState(maybeReset({ ...DEFAULT_STATE, ...JSON.parse(saved) }))
     } catch {}
+    try {
+      const savedHist = localStorage.getItem('anchorspace-history')
+      if (savedHist) setHistory(JSON.parse(savedHist))
+    } catch {}
   }
 
   const loadProfile = async (userId) => {
-    const { data } = await supabase.from('profiles').select('app_state').eq('id', userId).single()
-    if (data?.app_state) setAppState(maybeReset({ ...DEFAULT_STATE, ...data.app_state }))
+    const [{ data: profileData }, { data: logsData }] = await Promise.all([
+      supabase.from('profiles').select('app_state').eq('id', userId).single(),
+      supabase.from('daily_logs').select('date, entry').eq('user_id', userId).order('date', { ascending: false }).limit(28),
+    ])
+    if (profileData?.app_state) setAppState(maybeReset({ ...DEFAULT_STATE, ...profileData.app_state }))
+    if (logsData?.length) {
+      const hist = {}
+      logsData.forEach(row => { hist[row.date] = row.entry })
+      setHistory(hist)
+    }
     setLoading(false)
   }
 
@@ -1347,7 +1379,7 @@ export default function App() {
 
   const signOut = async () => {
     if (hasSupabase) await supabase.auth.signOut()
-    setUser(null); setAppState(DEFAULT_STATE)
+    setUser(null); setAppState(DEFAULT_STATE); setHistory({})
   }
 
   if (loading) return (
@@ -1359,5 +1391,5 @@ export default function App() {
   if (!user && hasSupabase)  return <LoginScreen onAuth={setUser} onSkip={() => {}} />
   if (!user && !hasSupabase) return <LoginScreen onAuth={() => {}} onSkip={() => setUser({ id: 'local', email: 'local' })} />
 
-  return <Dashboard state={appState} onUpdate={setAppState} user={hasSupabase ? user : null} onSignOut={signOut} />
+  return <Dashboard state={appState} onUpdate={setAppState} user={hasSupabase ? user : null} onSignOut={signOut} history={history} />
 }

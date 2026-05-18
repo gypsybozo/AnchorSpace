@@ -5,7 +5,8 @@
       "Read(//usr/local/bin/**)",
       "Read(//opt/homebrew/bin/**)",
       "Bash(brew list *)",
-      "Bash(brew install *)"
+      "Bash(brew install *)",
+      "Bash(pkill -f \"vite\")"
     ]
   }
 }
