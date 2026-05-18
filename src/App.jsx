@@ -149,7 +149,7 @@ const DEFAULT_STATE = {
   anchors: {
     workout:  { completed: false, isRestDay: false },
     read:     { completed: false },
-    meditate: { completed: false },
+    meditate: { completed: false, duration: null },
     checkin:  { completed: false, mood: 5 },
   },
   workoutText: '',
@@ -600,6 +600,225 @@ function CheckinCard({ state, onUpdate }) {
   )
 }
 
+// ── MeditateCard ─────────────────────────────────────────────────────────────
+const BREATH_PHASES = [
+  { name: 'in',       ms: 4000, freq: 528 },
+  { name: 'hold-in',  ms: 4000, freq: 480 },
+  { name: 'out',      ms: 4000, freq: 432 },
+  { name: 'hold-out', ms: 4000, freq: 396 },
+]
+
+function useTone() {
+  const ctxRef = useRef(null)
+
+  const getCtx = () => {
+    if (!ctxRef.current || ctxRef.current.state === 'closed') {
+      ctxRef.current = new (window.AudioContext || window.webkitAudioContext)()
+    }
+    if (ctxRef.current.state === 'suspended') ctxRef.current.resume()
+    return ctxRef.current
+  }
+
+  const play = (freq, fade = 1.0) => {
+    try {
+      const ctx  = getCtx()
+      const osc  = ctx.createOscillator()
+      const gain = ctx.createGain()
+      osc.connect(gain); gain.connect(ctx.destination)
+      osc.type = 'sine'
+      osc.frequency.value = freq
+      const t = ctx.currentTime
+      gain.gain.setValueAtTime(0, t)
+      gain.gain.linearRampToValueAtTime(0.1, t + 0.03)
+      gain.gain.exponentialRampToValueAtTime(0.001, t + fade)
+      osc.start(t); osc.stop(t + fade + 0.05)
+    } catch {}
+  }
+
+  const chime = () => {
+    [396, 432, 528].forEach((f, i) => setTimeout(() => play(f, 1.6), i * 400))
+  }
+
+  return { play, chime }
+}
+
+function MeditateCard({ state, onUpdate }) {
+  const { meditate } = state.anchors
+  const [active,   setActive]   = useState(false)
+  const [paused,   setPaused]   = useState(false)
+  const [duration, setDuration] = useState(10)
+  const [secsLeft, setSecsLeft] = useState(10 * 60)
+  const [phase,    setPhase]    = useState('hold-out')
+  const [soundOn,  setSoundOn]  = useState(true)
+
+  const timerRef    = useRef(null)
+  const breathRef   = useRef(null)
+  const soundRef    = useRef(true)
+  const onUpdateRef = useRef(onUpdate)
+  soundRef.current    = soundOn
+  onUpdateRef.current = onUpdate
+
+  const { play, chime } = useTone()
+  const tone = (freq) => { if (soundRef.current) play(freq) }
+
+  const stopTimer  = () => { clearInterval(timerRef.current); timerRef.current = null }
+  const stopBreath = () => { clearTimeout(breathRef.current); breathRef.current = null }
+
+  const runBreath = (idx = 0) => {
+    const { name, ms, freq } = BREATH_PHASES[idx % BREATH_PHASES.length]
+    setPhase(name)
+    tone(freq)
+    breathRef.current = setTimeout(() => runBreath(idx + 1), ms)
+  }
+
+  const startCountdown = (from) => {
+    stopTimer()
+    timerRef.current = setInterval(() => {
+      setSecsLeft(s => {
+        if (s <= 1) {
+          stopTimer(); stopBreath()
+          setActive(false); setPhase('hold-out')
+          if (soundRef.current) setTimeout(chime, 80)
+          onUpdateRef.current(p => ({ ...p, anchors: { ...p.anchors, meditate: { completed: true, duration } } }))
+          return 0
+        }
+        return s - 1
+      })
+    }, 1000)
+  }
+
+  const start = () => {
+    const secs = duration * 60
+    setActive(true); setPaused(false); setSecsLeft(secs)
+    runBreath(0); startCountdown(secs)
+  }
+
+  const pause = () => { setPaused(true); stopTimer(); stopBreath() }
+
+  const resume = () => {
+    setPaused(false)
+    runBreath(0)          // restart breath cycle from "in"
+    startCountdown(secsLeft)
+  }
+
+  const end = () => {
+    stopTimer(); stopBreath()
+    setActive(false); setPaused(false); setPhase('hold-out')
+  }
+
+  useEffect(() => () => { stopTimer(); stopBreath() }, [])
+
+  const toggle = () => onUpdate(p => ({
+    ...p,
+    anchors: { ...p.anchors, meditate: { ...p.anchors.meditate, completed: !meditate.completed } },
+  }))
+
+  const expanded    = phase === 'in' || phase === 'hold-in'
+  const phaseLabel  = { in: 'Breathe In', 'hold-in': 'Hold', out: 'Breathe Out', 'hold-out': 'Hold' }
+  const phaseNote   = { in: '← inhale', 'hold-in': '← hold', out: '← exhale', 'hold-out': '← hold' }
+  const mm          = String(Math.floor(secsLeft / 60)).padStart(2, '0')
+  const ss          = String(secsLeft % 60).padStart(2, '0')
+  const progress    = ((duration * 60 - secsLeft) / (duration * 60)) * 100
+
+  const SoundBtn = () => (
+    <button
+      onClick={() => setSoundOn(s => !s)}
+      title={soundOn ? 'Mute tones' : 'Enable tones'}
+      className={`px-3 py-2 rounded-lg border text-sm transition-colors ${soundOn ? 'border-sage/25 text-sage/55' : 'border-mineral/15 text-mineral/25'}`}
+    >
+      {soundOn ? '🔔' : '🔕'}
+    </button>
+  )
+
+  return (
+    <AnchorCard icon={Brain} label="Meditate" completed={meditate.completed} onToggle={toggle}>
+      {active ? (
+        <div className="space-y-4">
+          {/* Breathing circle */}
+          <div className="flex flex-col items-center gap-2 pt-1 pb-1">
+            <div className="relative w-28 h-28 flex items-center justify-center">
+              <div
+                className="absolute rounded-full bg-sage/15 transition-all duration-[4000ms] ease-in-out"
+                style={{ width: expanded ? '112px' : '44px', height: expanded ? '112px' : '44px' }}
+              />
+              <div
+                className="absolute rounded-full bg-sage/28 transition-all duration-[4000ms] ease-in-out"
+                style={{ width: expanded ? '76px' : '30px', height: expanded ? '76px' : '30px' }}
+              />
+              <Wind className="w-5 h-5 text-sage relative z-10" />
+            </div>
+            <p className="text-sage/80 text-sm tracking-[0.18em] uppercase font-medium">{phaseLabel[phase]}</p>
+            <p className="text-mineral/30 text-xs tracking-widest">4 · 4 · 4 · 4</p>
+          </div>
+
+          {/* Countdown + progress */}
+          <div>
+            <div className="flex items-baseline justify-between mb-1.5">
+              <span className="text-sage text-2xl font-light tabular-nums">{mm}:{ss}</span>
+              <span className="text-mineral/25 text-xs">{duration} min session</span>
+            </div>
+            <div className="h-0.5 bg-surface-dark/60 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-sage/40 rounded-full transition-all duration-1000"
+                style={{ width: `${progress}%` }}
+              />
+            </div>
+          </div>
+
+          {/* Controls */}
+          <div className="flex gap-2">
+            <button
+              onClick={paused ? resume : pause}
+              className="flex-1 py-2 rounded-lg bg-sage/15 text-sage text-sm flex items-center justify-center gap-1.5 hover:bg-sage/25 transition-colors"
+            >
+              {paused
+                ? <><Play className="w-3.5 h-3.5" /> Resume</>
+                : <><Pause className="w-3.5 h-3.5" /> Pause</>}
+            </button>
+            <button
+              onClick={end}
+              className="px-4 py-2 rounded-lg border border-mineral/15 text-mineral/40 text-xs hover:text-mineral/65 transition-colors"
+            >
+              End
+            </button>
+            <SoundBtn />
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-mineral/35 text-xs">Duration</span>
+            {[5, 10, 15, 20, 30].map(d => (
+              <button
+                key={d}
+                onClick={() => { setDuration(d); setSecsLeft(d * 60) }}
+                className={`px-2.5 py-1 rounded-lg text-xs border transition-colors ${
+                  duration === d
+                    ? 'bg-sage/20 border-sage/35 text-sage'
+                    : 'border-mineral/18 text-mineral/40 hover:border-sage/30 hover:text-mineral/65'
+                }`}
+              >
+                {d}m
+              </button>
+            ))}
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={start}
+              className="flex-1 py-2 rounded-lg bg-sage/15 text-sage text-sm flex items-center justify-center gap-1.5 hover:bg-sage/25 transition-colors"
+            >
+              <Play className="w-3.5 h-3.5" />
+              Start {duration} min
+            </button>
+            <SoundBtn />
+          </div>
+          <p className="text-mineral/25 text-xs">Box breathing · audio cues signal each phase</p>
+        </div>
+      )}
+    </AnchorCard>
+  )
+}
+
 // ── TranceWidget ──────────────────────────────────────────────────────────────
 function TranceWidget({ interval, onShowTrance, onChangeInterval }) {
   const [seconds, setSeconds] = useState(interval * 60)
@@ -703,10 +922,28 @@ function HistoryGrid({ history }) {
     return d.toISOString().split('T')[0]
   })
   const today = getToday()
+  const getCompleted = (v) => (typeof v === 'boolean' ? v : v?.completed ?? false)
+
   const getOpacity = (date) => {
     const e = history[date]
     if (!e) return 0
-    return Object.values(e).filter(Boolean).length / 4
+    return [e.workout, e.read, e.meditate, e.checkin].filter(getCompleted).length / 4
+  }
+
+  const getTooltip = (date) => {
+    const e = history[date]
+    if (!e) return date
+    const count = [e.workout, e.read, e.meditate, e.checkin].filter(getCompleted).length
+    const parts = [`${date} · ${count}/4`]
+    const mood = e.checkin?.mood
+    const dur  = e.meditate?.duration
+    const done = e.workout?.doneCount
+    const tot  = e.workout?.totalCount
+    if (mood != null)             parts.push(`mood ${mood}/10`)
+    if (dur  != null)             parts.push(`${dur}min meditation`)
+    if (tot  != null && tot > 0)  parts.push(`${done}/${tot} exercises`)
+    if (e.success)                parts.push(`"${e.success.slice(0, 40)}${e.success.length > 40 ? '…' : ''}"`)
+    return parts.join(' · ')
   }
 
   return (
@@ -717,7 +954,7 @@ function HistoryGrid({ history }) {
           const op = getOpacity(date)
           const isToday = date === today
           return (
-            <div key={date} title={`${date}${op > 0 ? ` · ${Math.round(op * 4)}/4` : ''}`}
+            <div key={date} title={getTooltip(date)}
               className={`w-full aspect-square rounded-md border flex items-center justify-center ${isToday ? 'border-sage/50' : 'border-mineral/15'}`}
               style={{ backgroundColor: op > 0 ? `rgba(143,158,139,${op * 0.65})` : 'transparent' }}>
               {isToday && <div className="w-1.5 h-1.5 rounded-full bg-sage" />}
@@ -918,9 +1155,7 @@ function Dashboard({ state, onUpdate, user, onSignOut }) {
           <p className="text-mineral/30 text-xs">Any book, article, or paper. Just read.</p>
         </AnchorCard>
 
-        <AnchorCard icon={Brain} label="Meditate" completed={state.anchors.meditate.completed} onToggle={() => toggleAnchor('meditate')}>
-          <p className="text-mineral/30 text-xs">Even 5 minutes counts.</p>
-        </AnchorCard>
+        <MeditateCard state={state} onUpdate={onUpdate} />
 
         <CheckinCard state={state} onUpdate={onUpdate} />
 
@@ -965,11 +1200,27 @@ export default function App() {
     const today = getToday()
     if (state.lastDate === today) return state
     const { anchors, lastDate, history, weekPlan } = state
+    const nonHeaderEx = (state.exercises || []).filter(ex => !ex.isHeader)
     const dayEntry = {
-      workout:  anchors.workout.completed || anchors.workout.isRestDay,
-      read:     anchors.read.completed,
-      meditate: anchors.meditate.completed,
-      checkin:  anchors.checkin.completed,
+      workout: {
+        completed: anchors.workout.completed || anchors.workout.isRestDay,
+        isRestDay: anchors.workout.isRestDay,
+        exercises: nonHeaderEx.map(ex => ({ name: ex.exercise, done: ex.completed })),
+        doneCount: nonHeaderEx.filter(ex => ex.completed).length,
+        totalCount: nonHeaderEx.length,
+      },
+      read: {
+        completed: anchors.read.completed,
+      },
+      meditate: {
+        completed: anchors.meditate.completed,
+        duration:  anchors.meditate.duration || null,
+      },
+      checkin: {
+        completed: anchors.checkin.completed,
+        mood:      anchors.checkin.mood,
+      },
+      success: state.shutdown?.success || '',
     }
     const todayKey  = DAY_KEYS[todayDayIdx()]
     const todayText = (weekPlan || {})[todayKey] || ''
