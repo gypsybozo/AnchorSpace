@@ -601,12 +601,13 @@ function CheckinCard({ state, onUpdate }) {
 }
 
 // ── MeditateCard ─────────────────────────────────────────────────────────────
-const BREATH_PHASES = [
-  { name: 'in',       ms: 4000, freq: 528 },
-  { name: 'hold-in',  ms: 4000, freq: 480 },
-  { name: 'out',      ms: 4000, freq: 432 },
-  { name: 'hold-out', ms: 4000, freq: 396 },
-]
+const BREATH_FREQS   = { in: 528, 'hold-in': 480, out: 432, 'hold-out': 396 }
+const BREATH_PRESETS = {
+  'Box':   { in: 4, holdIn: 4, out: 4,  holdOut: 4 },
+  '4-7-8': { in: 4, holdIn: 7, out: 8,  holdOut: 1 },
+  'Calm':  { in: 5, holdIn: 2, out: 5,  holdOut: 2 },
+  'Deep':  { in: 6, holdIn: 6, out: 6,  holdOut: 6 },
+}
 
 function useTone() {
   const ctxRef = useRef(null)
@@ -642,21 +643,44 @@ function useTone() {
   return { play, chime }
 }
 
+function PhaseStep({ label, value, onChange }) {
+  return (
+    <div className="flex flex-col items-center gap-1">
+      <span className="text-mineral/30 text-xs">{label}</span>
+      <div className="flex items-center gap-0.5">
+        <button
+          onClick={() => onChange(Math.max(1, value - 1))}
+          className="w-5 h-5 flex items-center justify-center text-mineral/35 hover:text-mineral/70 transition-colors text-base leading-none"
+        >−</button>
+        <span className="text-mineral/75 text-sm w-5 text-center tabular-nums">{value}</span>
+        <button
+          onClick={() => onChange(Math.min(12, value + 1))}
+          className="w-5 h-5 flex items-center justify-center text-mineral/35 hover:text-mineral/70 transition-colors text-base leading-none"
+        >+</button>
+      </div>
+      <span className="text-mineral/20 text-xs">s</span>
+    </div>
+  )
+}
+
 function MeditateCard({ state, onUpdate }) {
   const { meditate } = state.anchors
-  const [active,   setActive]   = useState(false)
-  const [paused,   setPaused]   = useState(false)
-  const [duration, setDuration] = useState(10)
-  const [secsLeft, setSecsLeft] = useState(10 * 60)
-  const [phase,    setPhase]    = useState('hold-out')
-  const [soundOn,  setSoundOn]  = useState(true)
+  const [active,      setActive]      = useState(false)
+  const [paused,      setPaused]      = useState(false)
+  const [duration,    setDuration]    = useState(10)
+  const [secsLeft,    setSecsLeft]    = useState(10 * 60)
+  const [phase,       setPhase]       = useState('hold-out')
+  const [soundOn,     setSoundOn]     = useState(true)
+  const [breathConfig, setBreathConfig] = useState({ in: 4, holdIn: 4, out: 4, holdOut: 4 })
 
-  const timerRef    = useRef(null)
-  const breathRef   = useRef(null)
-  const soundRef    = useRef(true)
-  const onUpdateRef = useRef(onUpdate)
-  soundRef.current    = soundOn
-  onUpdateRef.current = onUpdate
+  const timerRef       = useRef(null)
+  const breathRef      = useRef(null)
+  const soundRef       = useRef(true)
+  const onUpdateRef    = useRef(onUpdate)
+  const breathCfgRef   = useRef(breathConfig)
+  soundRef.current     = soundOn
+  onUpdateRef.current  = onUpdate
+  breathCfgRef.current = breathConfig
 
   const { play, chime } = useTone()
   const tone = (freq) => { if (soundRef.current) play(freq) }
@@ -665,9 +689,16 @@ function MeditateCard({ state, onUpdate }) {
   const stopBreath = () => { clearTimeout(breathRef.current); breathRef.current = null }
 
   const runBreath = (idx = 0) => {
-    const { name, ms, freq } = BREATH_PHASES[idx % BREATH_PHASES.length]
+    const cfg    = breathCfgRef.current
+    const phases = [
+      { name: 'in',       ms: cfg.in      * 1000 },
+      { name: 'hold-in',  ms: cfg.holdIn  * 1000 },
+      { name: 'out',      ms: cfg.out     * 1000 },
+      { name: 'hold-out', ms: cfg.holdOut * 1000 },
+    ]
+    const { name, ms } = phases[idx % phases.length]
     setPhase(name)
-    tone(freq)
+    tone(BREATH_FREQS[name])
     breathRef.current = setTimeout(() => runBreath(idx + 1), ms)
   }
 
@@ -697,7 +728,7 @@ function MeditateCard({ state, onUpdate }) {
 
   const resume = () => {
     setPaused(false)
-    runBreath(0)          // restart breath cycle from "in"
+    runBreath(0)
     startCountdown(secsLeft)
   }
 
@@ -706,6 +737,10 @@ function MeditateCard({ state, onUpdate }) {
     setActive(false); setPaused(false); setPhase('hold-out')
   }
 
+  const applyPreset = (vals) => setBreathConfig(vals)
+
+  const setCfgKey = (key, val) => setBreathConfig(c => ({ ...c, [key]: val }))
+
   useEffect(() => () => { stopTimer(); stopBreath() }, [])
 
   const toggle = () => onUpdate(p => ({
@@ -713,12 +748,20 @@ function MeditateCard({ state, onUpdate }) {
     anchors: { ...p.anchors, meditate: { ...p.anchors.meditate, completed: !meditate.completed } },
   }))
 
-  const expanded    = phase === 'in' || phase === 'hold-in'
-  const phaseLabel  = { in: 'Breathe In', 'hold-in': 'Hold', out: 'Breathe Out', 'hold-out': 'Hold' }
-  const phaseNote   = { in: '← inhale', 'hold-in': '← hold', out: '← exhale', 'hold-out': '← hold' }
-  const mm          = String(Math.floor(secsLeft / 60)).padStart(2, '0')
-  const ss          = String(secsLeft % 60).padStart(2, '0')
-  const progress    = ((duration * 60 - secsLeft) / (duration * 60)) * 100
+  const expanded = phase === 'in' || phase === 'hold-in'
+
+  // CSS transition duration matches the active phase duration
+  const transitionMs = phase === 'in'  ? breathConfig.in  * 1000
+                     : phase === 'out' ? breathConfig.out * 1000
+                     : 400
+
+  const phaseLabel = { in: 'Breathe In', 'hold-in': 'Hold', out: 'Breathe Out', 'hold-out': 'Hold' }
+  const patternStr = `${breathConfig.in} · ${breathConfig.holdIn} · ${breathConfig.out} · ${breathConfig.holdOut}`
+  const mm         = String(Math.floor(secsLeft / 60)).padStart(2, '0')
+  const ss         = String(secsLeft % 60).padStart(2, '0')
+  const progress   = ((duration * 60 - secsLeft) / (duration * 60)) * 100
+
+  const isPreset = (vals) => Object.entries(vals).every(([k, v]) => breathConfig[k] === v)
 
   const SoundBtn = () => (
     <button
@@ -738,17 +781,25 @@ function MeditateCard({ state, onUpdate }) {
           <div className="flex flex-col items-center gap-2 pt-1 pb-1">
             <div className="relative w-28 h-28 flex items-center justify-center">
               <div
-                className="absolute rounded-full bg-sage/15 transition-all duration-[4000ms] ease-in-out"
-                style={{ width: expanded ? '112px' : '44px', height: expanded ? '112px' : '44px' }}
+                className="absolute rounded-full bg-sage/15 ease-in-out"
+                style={{
+                  width:      expanded ? '112px' : '44px',
+                  height:     expanded ? '112px' : '44px',
+                  transition: `width ${transitionMs}ms ease-in-out, height ${transitionMs}ms ease-in-out`,
+                }}
               />
               <div
-                className="absolute rounded-full bg-sage/28 transition-all duration-[4000ms] ease-in-out"
-                style={{ width: expanded ? '76px' : '30px', height: expanded ? '76px' : '30px' }}
+                className="absolute rounded-full bg-sage/28 ease-in-out"
+                style={{
+                  width:      expanded ? '76px' : '30px',
+                  height:     expanded ? '76px' : '30px',
+                  transition: `width ${transitionMs}ms ease-in-out, height ${transitionMs}ms ease-in-out`,
+                }}
               />
               <Wind className="w-5 h-5 text-sage relative z-10" />
             </div>
             <p className="text-sage/80 text-sm tracking-[0.18em] uppercase font-medium">{phaseLabel[phase]}</p>
-            <p className="text-mineral/30 text-xs tracking-widest">4 · 4 · 4 · 4</p>
+            <p className="text-mineral/30 text-xs tracking-widest">{patternStr}</p>
           </div>
 
           {/* Countdown + progress */}
@@ -758,10 +809,7 @@ function MeditateCard({ state, onUpdate }) {
               <span className="text-mineral/25 text-xs">{duration} min session</span>
             </div>
             <div className="h-0.5 bg-surface-dark/60 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-sage/40 rounded-full transition-all duration-1000"
-                style={{ width: `${progress}%` }}
-              />
+              <div className="h-full bg-sage/40 rounded-full transition-all duration-1000" style={{ width: `${progress}%` }} />
             </div>
           </div>
 
@@ -771,14 +819,9 @@ function MeditateCard({ state, onUpdate }) {
               onClick={paused ? resume : pause}
               className="flex-1 py-2 rounded-lg bg-sage/15 text-sage text-sm flex items-center justify-center gap-1.5 hover:bg-sage/25 transition-colors"
             >
-              {paused
-                ? <><Play className="w-3.5 h-3.5" /> Resume</>
-                : <><Pause className="w-3.5 h-3.5" /> Pause</>}
+              {paused ? <><Play className="w-3.5 h-3.5" /> Resume</> : <><Pause className="w-3.5 h-3.5" /> Pause</>}
             </button>
-            <button
-              onClick={end}
-              className="px-4 py-2 rounded-lg border border-mineral/15 text-mineral/40 text-xs hover:text-mineral/65 transition-colors"
-            >
+            <button onClick={end} className="px-4 py-2 rounded-lg border border-mineral/15 text-mineral/40 text-xs hover:text-mineral/65 transition-colors">
               End
             </button>
             <SoundBtn />
@@ -786,33 +829,51 @@ function MeditateCard({ state, onUpdate }) {
         </div>
       ) : (
         <div className="space-y-3">
+          {/* Duration */}
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-mineral/35 text-xs">Duration</span>
             {[5, 10, 15, 20, 30].map(d => (
-              <button
-                key={d}
-                onClick={() => { setDuration(d); setSecsLeft(d * 60) }}
+              <button key={d} onClick={() => { setDuration(d); setSecsLeft(d * 60) }}
                 className={`px-2.5 py-1 rounded-lg text-xs border transition-colors ${
-                  duration === d
-                    ? 'bg-sage/20 border-sage/35 text-sage'
-                    : 'border-mineral/18 text-mineral/40 hover:border-sage/30 hover:text-mineral/65'
-                }`}
-              >
+                  duration === d ? 'bg-sage/20 border-sage/35 text-sage' : 'border-mineral/18 text-mineral/40 hover:border-sage/30 hover:text-mineral/65'
+                }`}>
                 {d}m
               </button>
             ))}
           </div>
+
+          {/* Breathing pattern */}
+          <div className="border border-mineral/10 rounded-xl p-3 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-mineral/35 text-xs">Breathing pattern</span>
+              <div className="flex gap-1">
+                {Object.entries(BREATH_PRESETS).map(([name, vals]) => (
+                  <button key={name} onClick={() => applyPreset(vals)}
+                    className={`px-2 py-0.5 rounded text-xs border transition-colors ${
+                      isPreset(vals) ? 'border-sage/40 bg-sage/15 text-sage' : 'border-mineral/15 text-mineral/30 hover:border-sage/25 hover:text-mineral/60'
+                    }`}>
+                    {name}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="grid grid-cols-4 gap-1">
+              <PhaseStep label="In"   value={breathConfig.in}      onChange={v => setCfgKey('in',      v)} />
+              <PhaseStep label="Hold" value={breathConfig.holdIn}  onChange={v => setCfgKey('holdIn',  v)} />
+              <PhaseStep label="Out"  value={breathConfig.out}     onChange={v => setCfgKey('out',     v)} />
+              <PhaseStep label="Hold" value={breathConfig.holdOut} onChange={v => setCfgKey('holdOut', v)} />
+            </div>
+          </div>
+
+          {/* Start */}
           <div className="flex gap-2">
-            <button
-              onClick={start}
-              className="flex-1 py-2 rounded-lg bg-sage/15 text-sage text-sm flex items-center justify-center gap-1.5 hover:bg-sage/25 transition-colors"
-            >
+            <button onClick={start}
+              className="flex-1 py-2 rounded-lg bg-sage/15 text-sage text-sm flex items-center justify-center gap-1.5 hover:bg-sage/25 transition-colors">
               <Play className="w-3.5 h-3.5" />
               Start {duration} min
             </button>
             <SoundBtn />
           </div>
-          <p className="text-mineral/25 text-xs">Box breathing · audio cues signal each phase</p>
         </div>
       )}
     </AnchorCard>
