@@ -17,23 +17,75 @@ const supabase = createClient(
 
 // ── Static data ───────────────────────────────────────────────────────────────
 const MICRO_WINS = [
-  'Step outside for 2 minutes and look at the sky.',
-  'Drink a full glass of water slowly.',
-  'Stand up, shake your hands, and take 3 deep breaths.',
-  'Write one thing you\'re grateful for right now.',
-  'Do 10 slow neck rolls, 5 each direction.',
-  'Close your eyes and listen to ambient sound for 60 seconds.',
-  'Wash your face with cold water.',
-  'Stretch your arms above your head and breathe deeply.',
-]
+  "Step outside for 2 minutes and look at the sky.",
+  "Drink a full glass of water slowly.",
+  "Stand up, shake your hands, and take 3 deep breaths.",
+  "Write one thing you're grateful for right now.",
+  "Do 10 slow neck rolls, 5 each direction.",
+  "Close your eyes and listen to ambient sound for 60 seconds.",
+  "Wash your face with cold water.",
+  "Stretch your arms above your head and breathe deeply.",
+  "Do 10 air squats right where you are.",
+  "Clear three pieces of trash or clutter from your desk.",
+  "Light a candle or use a drop of essential oil.",
+  "Listen to one high-energy song.",
+  "Eat a piece of fruit or a handful of nuts.",
+  "Do a 30-second plank.",
+  "Send a quick 'thinking of you' text to a friend.",
+  "Put on a fresh pair of socks.",
+  "Look at a photo that makes you happy.",
+  "Walk to the furthest room in your space and back.",
+  "Roll your shoulders back and down 10 times.",
+  "Spend 60 seconds doing box breathing (4-in, 4-hold, 4-out, 4-hold).",
+  "Organize your desktop icons or one digital folder.",
+  "Do 15 wall push-ups.",
+  "Gently massage your temples for 30 seconds.",
+  "Open a window to let in fresh air.",
+  "Tidy your bed or fold one item of clothing.",
+  "Write down your #1 priority for the next hour.",
+  "Do 20 jumping jacks.",
+  "Take a 2-minute tech-free walk.",
+  "Moisturize your hands.",
+  "Sit on the floor for 60 seconds to change your perspective.",
+  "Do 10 calf raises while standing.",
+  "Hum your favorite tune for 30 seconds.",
+  "Text yourself one thing you did well today."
+];
 
 const GROUNDING_PROMPTS = [
-  'Name 3 blue objects you can see from here.',
-  'Feel your feet on the floor. Notice the full weight of your body.',
-  'What\'s one thing you can smell right now?',
-  'Look out a window. Find something that\'s moving.',
-  'Name 5 things you see, 4 you can touch, 3 you can hear.',
-]
+  "Name 3 blue objects you can see from here.",
+  "Feel your feet on the floor. Notice the full weight of your body.",
+  "What's one thing you can smell right now?",
+  "Look out a window. Find something that's moving.",
+  "Name 5 things you see, 4 you can touch, 3 you can hear.",
+  "Find 3 items with a circular shape in your immediate view.",
+  "Notice the texture of the fabric against your skin.",
+  "Find something in the room that is older than you are.",
+  "Listen for the quietest sound you can possibly hear.",
+  "Describe the taste in your mouth right now.",
+  "Find 4 things in the room that are made of wood or metal.",
+  "Trace the outline of your hand with your eyes.",
+  "Identify the temperature of the air on your face.",
+  "Find 3 things that are perfectly still.",
+  "Notice where your body is touching your chair.",
+  "Find something that reflects light (mirror, glass, or screen).",
+  "Identify the source of the light in the room.",
+  "Describe the texture of your desk in your mind (rough, smooth, cold).",
+  "Count how many green things you can see in 10 seconds.",
+  "Clench your fists tight, then release. Feel the tension leave.",
+  "Find something that is a soft texture and touch it.",
+  "Imagine your breath is a color. What color is it?",
+  "Find 3 things in the room that are smaller than a coffee mug.",
+  "Focus on the tip of your nose. Feel the air moving.",
+  "Find an object with words on it and read them backward.",
+  "Look for a pattern (stripes, dots, wood grain) and follow it.",
+  "Notice the weight of your phone or a pen in your hand.",
+  "Find something that makes a sound when you tap it.",
+  "Identify the furthest object you can see through a window.",
+  "Count 5 breaths, noticing the pause at the top of each inhale.",
+  "Search for something in the room that is your favorite color.",
+  "Press your palms together as hard as you can for 5 seconds, then let go."
+];
 
 const TEMPLATES = {
   'Quick Home': `Warm-up:
@@ -57,12 +109,55 @@ B. Dead bug 10*3`,
   'Mobility Stretch': `Warm-up:
 A. Cat-cow 10*2
 Mobility:
-A. Hip flexor stretch 30secs hold 2*2
-B. Pigeon pose 45secs hold 2*2
+A. Hip flexor stretch 30secs*2
+B. Pigeon pose 45secs*2
 C. Thoracic rotation 10*2
 Cool-down:
 A. Childs pose 1 min*2
-B. Foam rolling 10 min`,
+B. Foam rolling 10 min*1`,
+  'Pilates': `Pilates:
+A. Hundred 10*3
+B. Roll Up 10*3
+C. Single Leg Stretch 10*3
+D. Double Leg Stretch 10*3
+E. Criss-Cross 10*3
+F. Spine Stretch 8*3
+G. Saw 8*3
+H. Teaser 5*3`,
+  'Yoga': `Youtube Class:
+45 mins`,
+  'Spinning': `Class`,
+  'Golf: Course': `Warm-up:
+A. Shoulder rotations 10*2
+B. Hip circles 10*2
+C. Torso twists 10*2
+Round:
+A. 18 holes`,
+  'Golf: Range': `Warm-up:
+A. Shoulder rotations 10*2
+B. Hip circles 10*2
+Range Session:
+A. Wedges 15*3
+B. Mid-irons 15*3
+C. Driver 15*3
+D. Putting 15 min*1`,
+  'Run: Tempo': `Warm-up:
+A. Easy jog 10 min*1
+Tempo:
+A. Tempo run 20 min*1
+Cool-down:
+A. Easy jog 5 min*1`,
+  'Run: Intervals': `Warm-up:
+A. Easy jog 5 min*1
+Intervals:
+A. Run hard 1 min*8
+B. Walk recovery 1 min*8
+Cool-down:
+A. Easy jog 5 min*1`,
+  'Run: Easy': `Running:
+A. Easy run 30 min*1`,
+  'Run: Long': `Running:
+A. Long run 60 min*1`,
 }
 
 // ── Day helpers ───────────────────────────────────────────────────────────────
@@ -994,12 +1089,21 @@ function TranceWidget({ interval, onShowTrance, onChangeInterval }) {
 
 // ── HistoryGrid ───────────────────────────────────────────────────────────────
 function HistoryGrid({ history }) {
-  const days = Array.from({ length: 28 }, (_, i) => {
-    const d = new Date()
-    d.setDate(d.getDate() - (27 - i))
-    return d.toISOString().split('T')[0]
-  })
-  const today = getToday()
+  const today   = getToday()
+
+  // Grow from first recorded day up to 28 days max
+  const histDates = Object.keys(history).filter(d => d <= today).sort()
+  const earliest  = histDates[0] ?? today
+  const maxStartD = new Date()
+  maxStartD.setUTCDate(maxStartD.getUTCDate() - 27)
+  const start     = earliest > maxStartD.toISOString().split('T')[0] ? earliest : maxStartD.toISOString().split('T')[0]
+  const startMs   = new Date(start).getTime()
+  const todayMs   = new Date(today).getTime()
+  const dayCount  = Math.round((todayMs - startMs) / 86400000) + 1
+  const days      = Array.from({ length: dayCount }, (_, i) =>
+    new Date(startMs + i * 86400000).toISOString().split('T')[0]
+  )
+
   const getCompleted = (v) => (typeof v === 'boolean' ? v : v?.completed ?? false)
 
   const getOpacity = (date) => {
@@ -1041,7 +1145,7 @@ function HistoryGrid({ history }) {
         })}
       </div>
       <div className="flex justify-between mt-2">
-        <span className="text-mineral/25 text-xs">4 weeks ago</span>
+        <span className="text-mineral/25 text-xs">{dayCount > 1 ? `${dayCount - 1} days ago` : ''}</span>
         <span className="text-mineral/25 text-xs">today</span>
       </div>
     </div>
